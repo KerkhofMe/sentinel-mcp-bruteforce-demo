@@ -1,0 +1,21 @@
+{
+  "properties": {
+    "schema": {
+      "name": "ThreatIntelIOC_CL",
+      "columns": [
+        { "name": "TimeGenerated", "type": "datetime" },
+        { "name": "IndicatorType", "type": "string" },
+        { "name": "IndicatorValue", "type": "string" },
+        { "name": "ThreatType", "type": "string" },
+        { "name": "Confidence", "type": "int" },
+        { "name": "Source", "type": "string" },
+        { "name": "FirstSeen", "type": "datetime" },
+        { "name": "LastSeen", "type": "datetime" },
+        { "name": "IsActive", "type": "boolean" },
+        { "name": "Description", "type": "string" }
+      ]
+    },
+    "plan": "Analytics",
+    "retentionInDays": 90
+  }
+}

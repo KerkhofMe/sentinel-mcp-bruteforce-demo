@@ -1,0 +1,37 @@
+{
+  "location": "centralus",
+  "properties": {
+    "dataCollectionEndpointId": "/subscriptions/<your-subscription-id>/resourceGroups/<your-resource-group>/providers/Microsoft.Insights/dataCollectionEndpoints/<your-dce-name>",
+    "streamDeclarations": {
+      "Custom-GeoIPLookup_CL": {
+        "columns": [
+          { "name": "TimeGenerated", "type": "datetime" },
+          { "name": "IPAddress", "type": "string" },
+          { "name": "Country", "type": "string" },
+          { "name": "City", "type": "string" },
+          { "name": "Latitude", "type": "real" },
+          { "name": "Longitude", "type": "real" },
+          { "name": "ISP", "type": "string" },
+          { "name": "ASN", "type": "string" }
+        ]
+      }
+    },
+    "dataSources": {},
+    "destinations": {
+      "logAnalytics": [
+        {
+          "workspaceResourceId": "/subscriptions/<your-subscription-id>/resourceGroups/<your-resource-group>/providers/Microsoft.OperationalInsights/workspaces/<your-workspace-name>",
+          "name": "cusSentinel"
+        }
+      ]
+    },
+    "dataFlows": [
+      {
+        "streams": ["Custom-GeoIPLookup_CL"],
+        "destinations": ["cusSentinel"],
+        "transformKql": "source",
+        "outputStream": "Custom-GeoIPLookup_CL"
+      }
+    ]
+  }
+}

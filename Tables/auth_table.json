@@ -1,0 +1,21 @@
+{
+  "properties": {
+    "schema": {
+      "name": "AuthenticationEvents_CL",
+      "columns": [
+        { "name": "TimeGenerated", "type": "datetime" },
+        { "name": "UserPrincipalName", "type": "string" },
+        { "name": "SourceIP", "type": "string" },
+        { "name": "AuthResult", "type": "string" },
+        { "name": "AuthMethod", "type": "string" },
+        { "name": "UserAgent", "type": "string" },
+        { "name": "ApplicationName", "type": "string" },
+        { "name": "MFACompleted", "type": "boolean" },
+        { "name": "FailureReason", "type": "string" },
+        { "name": "SessionId", "type": "string" }
+      ]
+    },
+    "plan": "Analytics",
+    "retentionInDays": 90
+  }
+}

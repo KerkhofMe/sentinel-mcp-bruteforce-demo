@@ -1,0 +1,19 @@
+{
+  "properties": {
+    "schema": {
+      "name": "GeoIPLookup_CL",
+      "columns": [
+        { "name": "TimeGenerated", "type": "datetime" },
+        { "name": "IPAddress", "type": "string" },
+        { "name": "Country", "type": "string" },
+        { "name": "City", "type": "string" },
+        { "name": "Latitude", "type": "real" },
+        { "name": "Longitude", "type": "real" },
+        { "name": "ISP", "type": "string" },
+        { "name": "ASN", "type": "string" }
+      ]
+    },
+    "plan": "Analytics",
+    "retentionInDays": 90
+  }
+}

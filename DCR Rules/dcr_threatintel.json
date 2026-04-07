@@ -1,0 +1,39 @@
+{
+  "location": "centralus",
+  "properties": {
+    "dataCollectionEndpointId": "/subscriptions/<your-subscription-id>/resourceGroups/<your-resource-group>/providers/Microsoft.Insights/dataCollectionEndpoints/<your-dce-name>",
+    "streamDeclarations": {
+      "Custom-ThreatIntelIOC_CL": {
+        "columns": [
+          { "name": "TimeGenerated", "type": "datetime" },
+          { "name": "IndicatorType", "type": "string" },
+          { "name": "IndicatorValue", "type": "string" },
+          { "name": "ThreatType", "type": "string" },
+          { "name": "Confidence", "type": "int" },
+          { "name": "Source", "type": "string" },
+          { "name": "FirstSeen", "type": "datetime" },
+          { "name": "LastSeen", "type": "datetime" },
+          { "name": "IsActive", "type": "boolean" },
+          { "name": "Description", "type": "string" }
+        ]
+      }
+    },
+    "dataSources": {},
+    "destinations": {
+      "logAnalytics": [
+        {
+          "workspaceResourceId": "/subscriptions/<your-subscription-id>/resourceGroups/<your-resource-group>/providers/Microsoft.OperationalInsights/workspaces/<your-workspace-name>",
+          "name": "cusSentinel"
+        }
+      ]
+    },
+    "dataFlows": [
+      {
+        "streams": ["Custom-ThreatIntelIOC_CL"],
+        "destinations": ["cusSentinel"],
+        "transformKql": "source",
+        "outputStream": "Custom-ThreatIntelIOC_CL"
+      }
+    ]
+  }
+}

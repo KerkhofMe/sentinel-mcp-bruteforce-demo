@@ -1,0 +1,106 @@
+// ============================================================================
+// Sentinel MCP Demo - Brute Force & Compromised Account KQL Queries
+// Use Case 2: Brute Force Detection, Impossible Travel, Threat Intel Matching
+// ============================================================================
+
+// ============================================================================
+// QUERY 1: Brute Force Detection
+// Detect accounts with >20 failed logins followed by a successful login
+// within a 1-hour window — classic credential stuffing/brute force pattern.
+// ============================================================================
+
+let threshold = 20;
+let timeWindow = 1h;
+let failures = AuthenticationEvents_CL
+| where TimeGenerated > ago(24h) and AuthResult == "Failure"
+| summarize 
+    FailedAttempts = count(),
+    FirstFailure = min(TimeGenerated),
+    LastFailure = max(TimeGenerated),
+    AttackerIPs = make_set(SourceIP),
+    FailureReasons = make_set_if(FailureReason, FailureReason != "")
+    by UserPrincipalName
+| where FailedAttempts >= threshold;
+failures
+| join kind=inner (
+    AuthenticationEvents_CL
+    | where TimeGenerated > ago(24h) and AuthResult == "Success"
+    | project UserPrincipalName, SuccessTime = TimeGenerated, SuccessIP = SourceIP
+) on UserPrincipalName
+| where SuccessTime > FirstFailure and (SuccessTime - FirstFailure) <= timeWindow
+| sort by SuccessTime asc
+| extend rn = row_number(1, prev(UserPrincipalName) != UserPrincipalName)
+| where rn == 1
+| extend AttackDuration = SuccessTime - FirstFailure
+| project 
+    UserPrincipalName,
+    FailedAttempts,
+    AttackDuration,
+    FirstFailure,
+    CompromiseTime = SuccessTime,
+    CompromiseIP = SuccessIP,
+    AttackerIPs,
+    FailureReasons
+| order by FailedAttempts desc
+
+
+// ============================================================================
+// QUERY 2: Impossible Travel Detection
+// Flag users who logged in from two different countries within 30 minutes.
+// Joins authentication events with GeoIP lookup data.
+// ============================================================================
+
+let impossibleTravelWindow = 30m;
+AuthenticationEvents_CL
+| where TimeGenerated > ago(24h) and AuthResult == "Success"
+| join kind=inner (GeoIPLookup_CL) on $left.SourceIP == $right.IPAddress
+| project TimeGenerated, UserPrincipalName, SourceIP, Country, City, Latitude, Longitude, ApplicationName, UserAgent
+| sort by UserPrincipalName asc, TimeGenerated asc
+| extend PrevTime = prev(TimeGenerated, 1), PrevCountry = prev(Country, 1), PrevCity = prev(City, 1), PrevUser = prev(UserPrincipalName, 1), PrevIP = prev(SourceIP, 1), PrevLat = prev(Latitude, 1), PrevLon = prev(Longitude, 1)
+| where UserPrincipalName == PrevUser and PrevCountry != Country
+| extend TimeDiff = TimeGenerated - PrevTime
+| where TimeDiff between (0min .. impossibleTravelWindow)
+| extend DistanceKm = round(2 * 6371 * asin(sqrt(
+    pow(sin(radians((Latitude - PrevLat) / 2)), 2) + 
+    cos(radians(PrevLat)) * cos(radians(Latitude)) * 
+    pow(sin(radians((Longitude - PrevLon) / 2)), 2)
+    )), 0)
+| extend RequiredSpeedKmh = round(DistanceKm / (toreal(TimeDiff / 1m) / 60), 0)
+| project 
+    UserPrincipalName,
+    Login1_Time = PrevTime, Login1_IP = PrevIP, Login1_Location = strcat(PrevCity, ", ", PrevCountry),
+    Login2_Time = TimeGenerated, Login2_IP = SourceIP, Login2_Location = strcat(City, ", ", Country),
+    TimeBetweenLogins = TimeDiff,
+    DistanceKm,
+    RequiredSpeedKmh,
+    ApplicationName
+
+
+// ============================================================================
+// QUERY 3: Threat Intelligence IOC Cross-Reference
+// Match successful login source IPs against known malicious IPs from 
+// the threat intelligence feed.
+// ============================================================================
+
+let activeThreatIPs = 
+    ThreatIntelIOC_CL
+    | where IndicatorType == "ipv4" and IsActive == true
+    | project IndicatorValue, ThreatType, Confidence, Source, Description;
+AuthenticationEvents_CL
+| where TimeGenerated > ago(24h) and AuthResult == "Success"
+| join kind=inner (activeThreatIPs) on $left.SourceIP == $right.IndicatorValue
+| join kind=leftouter (GeoIPLookup_CL) on $left.SourceIP == $right.IPAddress
+| project 
+    TimeGenerated,
+    UserPrincipalName,
+    SourceIP,
+    Country,
+    City,
+    ApplicationName,
+    ThreatType,
+    Confidence,
+    ThreatSource = Source,
+    ThreatDescription = Description,
+    MFACompleted,
+    UserAgent
+| order by Confidence desc, TimeGenerated desc

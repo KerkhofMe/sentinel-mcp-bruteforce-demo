@@ -1,0 +1,155 @@
+// ============================================================================
+// MCP TOOL 1: detect_brute_force_compromise
+// ============================================================================
+// 
+// TOOL NAME:        detect_brute_force_compromise
+// COLLECTION:       BruteForceDemo
+// DEFAULT WORKSPACE: <your-workspace-name>
+//
+// DESCRIPTION:
+// Detects brute force attacks where an account received a high number of 
+// failed login attempts followed by a successful login within a short time 
+// window. Returns the compromised user, attack duration, attacker IPs, and 
+// failure reasons. Use this tool first to identify compromised accounts.
+//
+// PARAMETERS:
+//   {Threshold}     - Minimum number of failed login attempts to trigger 
+//                     detection (default: 20)
+//   {LookbackHours} - Number of hours to look back for events (default: 24)
+//
+// ============================================================================
+
+let threshold = {Threshold};
+let timeWindow = 1h;
+let failures = AuthenticationEvents_CL
+| where TimeGenerated > ago({LookbackHours}h) and AuthResult == "Failure"
+| summarize 
+    FailedAttempts = count(),
+    FirstFailure = min(TimeGenerated),
+    LastFailure = max(TimeGenerated),
+    AttackerIPs = make_set(SourceIP),
+    FailureReasons = make_set_if(FailureReason, FailureReason != "")
+    by UserPrincipalName
+| where FailedAttempts >= threshold;
+failures
+| join kind=inner (
+    AuthenticationEvents_CL
+    | where TimeGenerated > ago({LookbackHours}h) and AuthResult == "Success"
+    | project UserPrincipalName, SuccessTime = TimeGenerated, SuccessIP = SourceIP
+) on UserPrincipalName
+| where SuccessTime > FirstFailure and (SuccessTime - FirstFailure) <= timeWindow
+| sort by SuccessTime asc
+| extend rn = row_number(1, prev(UserPrincipalName) != UserPrincipalName)
+| where rn == 1
+| extend AttackDuration = SuccessTime - FirstFailure
+| project 
+    UserPrincipalName,
+    FailedAttempts,
+    AttackDuration,
+    FirstFailure,
+    CompromiseTime = SuccessTime,
+    CompromiseIP = SuccessIP,
+    AttackerIPs,
+    FailureReasons
+| order by FailedAttempts desc
+
+
+// ============================================================================
+// MCP TOOL 2: detect_impossible_travel
+// ============================================================================
+// 
+// TOOL NAME:        detect_impossible_travel
+// COLLECTION:       BruteForceDemo
+// DEFAULT WORKSPACE: <your-workspace-name>
+//
+// DESCRIPTION:
+// Detects impossible travel by finding users who logged in successfully from 
+// two different countries within a short time window. Calculates the distance 
+// and required travel speed between login locations. Use this tool after 
+// detect_brute_force_compromise to check if a compromised account shows 
+// impossible travel patterns.
+//
+// PARAMETERS:
+//   {UserPrincipalName} - The user principal name to investigate, or '*' for 
+//                         all users
+//   {TravelWindowMinutes} - Maximum minutes between logins to flag as 
+//                           impossible travel (default: 30)
+//
+// ============================================================================
+
+let impossibleTravelWindow = {TravelWindowMinutes}m;
+let targetUser = "{UserPrincipalName}";
+AuthenticationEvents_CL
+| where TimeGenerated > ago(24h) and AuthResult == "Success"
+| where targetUser == "*" or UserPrincipalName == targetUser
+| join kind=inner (GeoIPLookup_CL) on $left.SourceIP == $right.IPAddress
+| project TimeGenerated, UserPrincipalName, SourceIP, Country, City, Latitude, Longitude, ApplicationName, UserAgent
+| sort by UserPrincipalName asc, TimeGenerated asc
+| extend PrevTime = prev(TimeGenerated, 1), PrevCountry = prev(Country, 1), PrevCity = prev(City, 1), PrevUser = prev(UserPrincipalName, 1), PrevIP = prev(SourceIP, 1), PrevLat = prev(Latitude, 1), PrevLon = prev(Longitude, 1)
+| where UserPrincipalName == PrevUser and PrevCountry != Country
+| extend TimeDiff = TimeGenerated - PrevTime
+| where TimeDiff between (0min .. impossibleTravelWindow)
+| extend DistanceKm = round(2 * 6371 * asin(sqrt(
+    pow(sin(radians((Latitude - PrevLat) / 2)), 2) + 
+    cos(radians(PrevLat)) * cos(radians(Latitude)) * 
+    pow(sin(radians((Longitude - PrevLon) / 2)), 2)
+    )), 0)
+| extend RequiredSpeedKmh = round(DistanceKm / (toreal(TimeDiff / 1m) / 60), 0)
+| project 
+    UserPrincipalName,
+    Login1_Time = PrevTime, Login1_IP = PrevIP, Login1_Location = strcat(PrevCity, ", ", PrevCountry),
+    Login2_Time = TimeGenerated, Login2_IP = SourceIP, Login2_Location = strcat(City, ", ", Country),
+    TimeBetweenLogins = TimeDiff,
+    DistanceKm,
+    RequiredSpeedKmh,
+    ApplicationName
+
+
+// ============================================================================
+// MCP TOOL 3: match_threat_intel_logins
+// ============================================================================
+// 
+// TOOL NAME:        match_threat_intel_logins
+// COLLECTION:       BruteForceDemo
+// DEFAULT WORKSPACE: <your-workspace-name>
+//
+// DESCRIPTION:
+// Cross-references successful login source IPs against active threat 
+// intelligence indicators to identify logins from known malicious 
+// infrastructure. Returns threat type, confidence score, source feed, 
+// and geo-location. Use this tool to enrich findings from 
+// detect_brute_force_compromise with threat intelligence context.
+//
+// PARAMETERS:
+//   {UserPrincipalName} - The user principal name to investigate, or '*' for 
+//                         all users
+//   {MinConfidence}     - Minimum threat intelligence confidence score to 
+//                         include (default: 0)
+//
+// ============================================================================
+
+let targetUser = "{UserPrincipalName}";
+let minConf = {MinConfidence};
+let activeThreatIPs = 
+    ThreatIntelIOC_CL
+    | where IndicatorType == "ipv4" and IsActive == true and Confidence >= minConf
+    | project IndicatorValue, ThreatType, Confidence, Source, Description;
+AuthenticationEvents_CL
+| where TimeGenerated > ago(24h) and AuthResult == "Success"
+| where targetUser == "*" or UserPrincipalName == targetUser
+| join kind=inner (activeThreatIPs) on $left.SourceIP == $right.IndicatorValue
+| join kind=leftouter (GeoIPLookup_CL) on $left.SourceIP == $right.IPAddress
+| project 
+    TimeGenerated,
+    UserPrincipalName,
+    SourceIP,
+    Country,
+    City,
+    ApplicationName,
+    ThreatType,
+    Confidence,
+    ThreatSource = Source,
+    ThreatDescription = Description,
+    MFACompleted,
+    UserAgent
+| order by Confidence desc, TimeGenerated desc
